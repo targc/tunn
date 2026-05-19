@@ -41,6 +41,7 @@ func New(cfg *Config, routes IRouteManager, tlsCfg *tls.Config) *TunnelServer {
 
 func (s *TunnelServer) Start(ctx context.Context) error {
 	go s.startWSServer(ctx)
+	s.startDirectListeners(ctx)
 	return s.startTCPListener(ctx)
 }
 
@@ -69,6 +70,101 @@ func (s *TunnelServer) startTCPListener(ctx context.Context) error {
 		}
 		go s.handleConn(ctx, conn)
 	}
+}
+
+func (s *TunnelServer) startDirectListeners(ctx context.Context) {
+	routes, err := s.routes.ListenRoutes(ctx)
+	if err != nil {
+		slog.Error("failed to query listen routes", "err", err)
+		return
+	}
+
+	for _, route := range routes {
+		route := route
+		go func() {
+			ln, err := net.Listen("tcp", route.Listen)
+			if err != nil {
+				slog.Error("failed to start direct listener", "addr", route.Listen, "domain", route.Domain, "err", err)
+				return
+			}
+
+			slog.Info("direct listener started", "addr", route.Listen, "domain", route.Domain, "target", route.Service)
+
+			go func() {
+				<-ctx.Done()
+				ln.Close()
+			}()
+
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					if ctx.Err() != nil {
+						return
+					}
+					slog.Error("direct accept error", "addr", route.Listen, "err", err)
+					continue
+				}
+				go s.handleDirectConn(ctx, conn, &route)
+			}
+		}()
+	}
+}
+
+func (s *TunnelServer) handleDirectConn(ctx context.Context, conn net.Conn, route *Route) {
+	slog.Debug("direct connection", "addr", route.Listen, "domain", route.Domain, "remote", conn.RemoteAddr())
+
+	var proxyConn net.Conn
+	if route.TLS == "terminate" {
+		if s.tlsCfg == nil {
+			slog.Error("tls terminate requested but no cert configured", "domain", route.Domain)
+			conn.Close()
+			return
+		}
+		tlsConn, err := terminateTLS(conn, s.tlsCfg)
+		if err != nil {
+			slog.Warn("tls termination failed", "err", err, "domain", route.Domain)
+			conn.Close()
+			return
+		}
+		slog.Debug("tls terminated", "domain", route.Domain)
+		proxyConn = tlsConn
+	} else {
+		proxyConn = conn
+	}
+
+	agent := s.getAgent(route.Cluster)
+	if agent == nil {
+		slog.Warn("no agent for cluster", "cluster", route.Cluster, "domain", route.Domain)
+		conn.Close()
+		return
+	}
+
+	stream := s.streams.Create(proxyConn, route.Service, route.Cluster)
+	slog.Info("stream opened", "id", stream.ID, "domain", route.Domain, "target", route.Service, "cluster", route.Cluster)
+
+	frame := proto.EncodeFrame(&proto.Frame{
+		Type:     proto.MsgOpenStream,
+		StreamID: stream.ID,
+		Payload:  []byte(route.Service),
+	})
+
+	select {
+	case agent.writeCh <- frame:
+	default:
+		slog.Error("write channel full, dropping stream", "id", stream.ID)
+		s.streams.Remove(stream.ID)
+		return
+	}
+
+	go func() {
+		select {
+		case <-stream.Ready:
+			slog.Info("stream ready, proxying", "id", stream.ID, "domain", route.Domain, "target", route.Service)
+			s.proxyClientToAgent(stream, agent)
+		case <-ctx.Done():
+			s.streams.Remove(stream.ID)
+		}
+	}()
 }
 
 func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {

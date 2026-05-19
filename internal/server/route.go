@@ -12,7 +12,8 @@ type Route struct {
 	Service string         `yaml:"service" gorm:"column:service;type:varchar(200);not null"`
 	Cluster string         `yaml:"cluster" gorm:"column:cluster;type:varchar(100);not null"`
 	ALPN    pq.StringArray `yaml:"alpn,omitempty" gorm:"column:alpn;type:text[]"`
-	TLS     string         `yaml:"tls,omitempty" gorm:"column:tls;type:varchar(20);default:passthrough"`
+	TLS     string         `yaml:"tls,omitempty" gorm:"column:tls;type:varchar(20);default:terminiate"`
+	Listen  string         `yaml:"listen,omitempty" gorm:"column:listen;type:varchar(20)"`
 }
 
 func (Route) TableName() string {
@@ -21,6 +22,7 @@ func (Route) TableName() string {
 
 type IRouteManager interface {
 	LookupRoute(ctx context.Context, domain string) (*Route, error)
+	ListenRoutes(ctx context.Context) ([]Route, error)
 	Close(ctx context.Context) error
 }
 

@@ -39,6 +39,16 @@ func (r *RouteManagerYAML) LookupRoute(_ context.Context, domain string) (*Route
 	return entry, nil
 }
 
+func (r *RouteManagerYAML) ListenRoutes(_ context.Context) ([]Route, error) {
+	var routes []Route
+	for _, route := range r.routes {
+		if route.Listen != "" {
+			routes = append(routes, *route)
+		}
+	}
+	return routes, nil
+}
+
 func (r *RouteManagerYAML) Close(_ context.Context) error {
 	return nil
 }

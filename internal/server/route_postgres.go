@@ -59,6 +59,21 @@ func (r *RouteManagerPostgres) LookupRoute(ctx context.Context, domain string) (
 	return &route, nil
 }
 
+func (r *RouteManagerPostgres) ListenRoutes(ctx context.Context) ([]Route, error) {
+	var routes []Route
+	err := r.db.
+		WithContext(ctx).
+		Where("listen IS NOT NULL AND listen != ''").
+		Find(&routes).
+		Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query listen routes: %w", err)
+	}
+
+	return routes, nil
+}
+
 func (r *RouteManagerPostgres) Close(ctx context.Context) error {
 	sqlDB, err := r.db.DB()
 	if err != nil {
