@@ -3,36 +3,24 @@ package server
 import (
 	"fmt"
 	"sync"
-
-	"github.com/targc/tunn/internal/config"
 )
 
-type RouteEntry struct {
-	Domain  string
-	Service string
-	ALPN    []string
-}
-
 type RouteTable struct {
-	routes map[string]*RouteEntry
+	routes map[string]*Route
 	mu     sync.RWMutex
 }
 
-func NewRouteTable(routes []config.Route) *RouteTable {
+func NewRouteTable(routes []Route) *RouteTable {
 	rt := &RouteTable{
-		routes: make(map[string]*RouteEntry, len(routes)),
+		routes: make(map[string]*Route, len(routes)),
 	}
-	for _, r := range routes {
-		rt.routes[r.Domain] = &RouteEntry{
-			Domain:  r.Domain,
-			Service: r.Service,
-			ALPN:    r.ALPN,
-		}
+	for i := range routes {
+		rt.routes[routes[i].Domain] = &routes[i]
 	}
 	return rt
 }
 
-func (rt *RouteTable) Lookup(domain string) (*RouteEntry, error) {
+func (rt *RouteTable) Lookup(domain string) (*Route, error) {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
 
@@ -43,7 +31,7 @@ func (rt *RouteTable) Lookup(domain string) (*RouteEntry, error) {
 	return entry, nil
 }
 
-func (rt *RouteTable) ValidateALPN(entry *RouteEntry, clientALPN []string) error {
+func (rt *RouteTable) ValidateALPN(entry *Route, clientALPN []string) error {
 	if len(entry.ALPN) == 0 {
 		return nil // no ALPN restriction
 	}

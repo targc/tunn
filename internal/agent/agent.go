@@ -11,18 +11,17 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/targc/tunn/internal/config"
 	"github.com/targc/tunn/internal/proto"
 )
 
 type TunnelAgent struct {
-	config  *config.AgentConfig
+	config  *Config
 	streams map[uint32]net.Conn
 	writeCh chan []byte
 	mu      sync.RWMutex
 }
 
-func New(cfg *config.AgentConfig) *TunnelAgent {
+func New(cfg *Config) *TunnelAgent {
 	return &TunnelAgent{
 		config:  cfg,
 		streams: make(map[uint32]net.Conn),

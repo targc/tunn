@@ -1,9 +1,3 @@
-server:
-  listen: ":6060"
-  ws_listen: ":6061"
-  agent_token: "change-me"
-  log_level: "info"
-
 routes:
   - domain: "test-pg-1.tcplb.nortezh.com"
     service: "example-pg-1.default.svc.cluster.local:5432"

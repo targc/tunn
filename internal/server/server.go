@@ -10,12 +10,11 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/targc/tunn/internal/config"
 	"github.com/targc/tunn/internal/proto"
 )
 
 type TunnelServer struct {
-	config  *config.ServerConfig
+	config  *Config
 	routes  *RouteTable
 	streams *StreamManager
 
@@ -24,7 +23,7 @@ type TunnelServer struct {
 	mu        sync.RWMutex
 }
 
-func New(cfg *config.ServerConfig) *TunnelServer {
+func New(cfg *Config) *TunnelServer {
 	return &TunnelServer{
 		config:  cfg,
 		routes:  NewRouteTable(cfg.Routes),
@@ -39,13 +38,13 @@ func (s *TunnelServer) Start(ctx context.Context) error {
 }
 
 func (s *TunnelServer) startTCPListener(ctx context.Context) error {
-	ln, err := net.Listen("tcp", s.config.Server.Listen)
+	ln, err := net.Listen("tcp", s.config.Listen)
 	if err != nil {
-		return fmt.Errorf("failed to listen on %s: %w", s.config.Server.Listen, err)
+		return fmt.Errorf("failed to listen on %s: %w", s.config.Listen, err)
 	}
 	defer ln.Close()
 
-	slog.Info("tcp listener started", "addr", s.config.Server.Listen)
+	slog.Info("tcp listener started", "addr", s.config.Listen)
 
 	go func() {
 		<-ctx.Done()
@@ -161,8 +160,8 @@ func (s *TunnelServer) startWSServer(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleAgentWS)
 
-	srv := &http.Server{Addr: s.config.Server.WSListen, Handler: mux}
-	slog.Info("ws listener started", "addr", s.config.Server.WSListen)
+	srv := &http.Server{Addr: s.config.WSListen, Handler: mux}
+	slog.Info("ws listener started", "addr", s.config.WSListen)
 
 	go func() {
 		<-ctx.Done()
@@ -176,7 +175,7 @@ func (s *TunnelServer) startWSServer(ctx context.Context) {
 
 func (s *TunnelServer) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 	token := r.Header.Get("Authorization")
-	expected := "Bearer " + s.config.Server.AgentToken
+	expected := "Bearer " + s.config.AgentToken
 	if token != expected {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
