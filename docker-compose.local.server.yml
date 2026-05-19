@@ -1,4 +1,10 @@
 services:
+  cert-init:
+    image: alpine/openssl
+    entrypoint: ["/bin/sh", "-c", "[ -f /certs/tunn.crt ] && echo 'certs exist' || openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -keyout /certs/tunn.key -out /certs/tunn.crt -subj '/CN=*.tunn.nortezh.com' -addext 'subjectAltName=DNS:*.tunn.nortezh.com'"]
+    volumes:
+      - certs:/certs
+
   server:
     build:
       context: .
@@ -9,9 +15,15 @@ services:
     environment:
       - TUNN_AGENT_TOKEN=${TUNN_AGENT_TOKEN}
       - TUNN_DATABASE_URL=postgres://tunn:tunn@db:5432/tunn?sslmode=disable
+      - TUNN_TLS_CERT=/certs/tunn.crt
+      - TUNN_TLS_KEY=/certs/tunn.key
+    volumes:
+      - certs:/certs:ro
     depends_on:
       db:
         condition: service_healthy
+      cert-init:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   db:
@@ -30,3 +42,4 @@ services:
 
 volumes:
   pgdata:
+  certs:

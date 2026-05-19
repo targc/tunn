@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,16 +23,18 @@ type TunnelServer struct {
 	config  *Config
 	routes  IRouteManager
 	streams *StreamManager
+	tlsCfg  *tls.Config
 
 	agents map[string]*agentConn
 	mu     sync.RWMutex
 }
 
-func New(cfg *Config, routes IRouteManager) *TunnelServer {
+func New(cfg *Config, routes IRouteManager, tlsCfg *tls.Config) *TunnelServer {
 	return &TunnelServer{
 		config:  cfg,
 		routes:  routes,
 		streams: NewStreamManager(),
+		tlsCfg:  tlsCfg,
 		agents:  make(map[string]*agentConn),
 	}
 }
@@ -100,7 +103,27 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	stream := s.streams.Create(replayConn, route.Service, route.Cluster)
+	// Determine the connection to proxy: terminate TLS or passthrough
+	var proxyConn net.Conn
+	if route.TLS == "terminate" {
+		if s.tlsCfg == nil {
+			slog.Error("tls terminate requested but no cert configured", "sni", info.SNI)
+			conn.Close()
+			return
+		}
+		tlsConn, err := terminateTLS(replayConn, s.tlsCfg)
+		if err != nil {
+			slog.Warn("tls termination failed", "err", err, "sni", info.SNI)
+			conn.Close()
+			return
+		}
+		slog.Debug("tls terminated", "sni", info.SNI)
+		proxyConn = tlsConn
+	} else {
+		proxyConn = replayConn
+	}
+
+	stream := s.streams.Create(proxyConn, route.Service, route.Cluster)
 	slog.Info("stream opened", "id", stream.ID, "sni", info.SNI, "target", route.Service, "cluster", route.Cluster)
 
 	frame := proto.EncodeFrame(&proto.Frame{

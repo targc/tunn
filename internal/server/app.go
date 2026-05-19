@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"log/slog"
 )
 
@@ -21,6 +22,15 @@ func NewApp(ctx context.Context) (*App, error) {
 		return nil, err
 	}
 
+	var tlsCfg *tls.Config
+	if cfg.TLSCert != "" && cfg.TLSKey != "" {
+		tlsCfg, err = loadTLSConfig(cfg.TLSCert, cfg.TLSKey)
+		if err != nil {
+			return nil, err
+		}
+		slog.Info("tls termination enabled")
+	}
+
 	slog.Info("tunnel server configured",
 		"tcp", cfg.Listen,
 		"ws", cfg.WSListen,
@@ -28,7 +38,7 @@ func NewApp(ctx context.Context) (*App, error) {
 
 	return &App{
 		Config: cfg,
-		Server: New(cfg, routeMgr),
+		Server: New(cfg, routeMgr, tlsCfg),
 	}, nil
 }
 

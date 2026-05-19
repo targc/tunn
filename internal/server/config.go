@@ -14,6 +14,8 @@ type Config struct {
 	LogLevel    string `env:"TUNN_LOG_LEVEL, default=info"`
 	RoutesPath  string `env:"TUNN_ROUTES_PATH"`
 	DatabaseURL string `env:"TUNN_DATABASE_URL"`
+	TLSCert     string `env:"TUNN_TLS_CERT"`
+	TLSKey      string `env:"TUNN_TLS_KEY"`
 }
 
 func loadConfig(ctx context.Context) (*Config, error) {

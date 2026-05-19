@@ -12,6 +12,7 @@ type Route struct {
 	Service string         `yaml:"service" gorm:"column:service;type:varchar(200);not null"`
 	Cluster string         `yaml:"cluster" gorm:"column:cluster;type:varchar(100);not null"`
 	ALPN    pq.StringArray `yaml:"alpn,omitempty" gorm:"column:alpn;type:text[]"`
+	TLS     string         `yaml:"tls,omitempty" gorm:"column:tls;type:varchar(20);default:passthrough"`
 }
 
 func (Route) TableName() string {
