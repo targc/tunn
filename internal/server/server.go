@@ -113,58 +113,14 @@ func (s *TunnelServer) startDirectListeners(ctx context.Context) {
 func (s *TunnelServer) handleDirectConn(ctx context.Context, conn net.Conn, route *Route) {
 	slog.Debug("direct connection", "addr", route.Listen, "domain", route.Domain, "remote", conn.RemoteAddr())
 
-	var proxyConn net.Conn
-	if route.TLS == "terminate" {
-		if s.tlsCfg == nil {
-			slog.Error("tls terminate requested but no cert configured", "domain", route.Domain)
-			conn.Close()
-			return
-		}
-		tlsConn, err := terminateTLS(conn, s.tlsCfg)
-		if err != nil {
-			slog.Warn("tls termination failed", "err", err, "domain", route.Domain)
-			conn.Close()
-			return
-		}
-		slog.Debug("tls terminated", "domain", route.Domain)
-		proxyConn = tlsConn
-	} else {
-		proxyConn = conn
-	}
-
-	agent := s.getAgent(route.Cluster)
-	if agent == nil {
-		slog.Warn("no agent for cluster", "cluster", route.Cluster, "domain", route.Domain)
+	proxyConn, err := s.resolveConn(conn, route)
+	if err != nil {
+		slog.Warn("resolve conn failed", "err", err, "domain", route.Domain)
 		conn.Close()
 		return
 	}
 
-	stream := s.streams.Create(proxyConn, route.Service, route.Cluster)
-	slog.Info("stream opened", "id", stream.ID, "domain", route.Domain, "target", route.Service, "cluster", route.Cluster)
-
-	frame := proto.EncodeFrame(&proto.Frame{
-		Type:     proto.MsgOpenStream,
-		StreamID: stream.ID,
-		Payload:  []byte(route.Service),
-	})
-
-	select {
-	case agent.writeCh <- frame:
-	default:
-		slog.Error("write channel full, dropping stream", "id", stream.ID)
-		s.streams.Remove(stream.ID)
-		return
-	}
-
-	go func() {
-		select {
-		case <-stream.Ready:
-			slog.Info("stream ready, proxying", "id", stream.ID, "domain", route.Domain, "target", route.Service)
-			s.proxyClientToAgent(stream, agent)
-		case <-ctx.Done():
-			s.streams.Remove(stream.ID)
-		}
-	}()
+	s.openStream(ctx, proxyConn, route)
 }
 
 func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
@@ -192,35 +148,43 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	agent := s.getAgent(route.Cluster)
-	if agent == nil {
-		slog.Warn("no agent for cluster", "cluster", route.Cluster, "sni", info.SNI)
+	proxyConn, err := s.resolveConn(replayConn, route)
+	if err != nil {
+		slog.Warn("resolve conn failed", "err", err, "sni", info.SNI)
 		conn.Close()
 		return
 	}
 
-	// Determine the connection to proxy: terminate TLS or passthrough
-	var proxyConn net.Conn
+	s.openStream(ctx, proxyConn, route)
+}
+
+// resolveConn handles TLS termination or passthrough based on route config.
+func (s *TunnelServer) resolveConn(conn net.Conn, route *Route) (net.Conn, error) {
 	if route.TLS == "terminate" {
 		if s.tlsCfg == nil {
-			slog.Error("tls terminate requested but no cert configured", "sni", info.SNI)
-			conn.Close()
-			return
+			return nil, fmt.Errorf("tls terminate requested but no cert configured")
 		}
-		tlsConn, err := terminateTLS(replayConn, s.tlsCfg)
+		tlsConn, err := terminateTLS(conn, s.tlsCfg)
 		if err != nil {
-			slog.Warn("tls termination failed", "err", err, "sni", info.SNI)
-			conn.Close()
-			return
+			return nil, fmt.Errorf("tls termination failed: %w", err)
 		}
-		slog.Debug("tls terminated", "sni", info.SNI)
-		proxyConn = tlsConn
-	} else {
-		proxyConn = replayConn
+		slog.Debug("tls terminated", "domain", route.Domain)
+		return tlsConn, nil
+	}
+	return conn, nil
+}
+
+// openStream creates a stream, sends it to the agent, and starts proxying.
+func (s *TunnelServer) openStream(ctx context.Context, conn net.Conn, route *Route) {
+	agent := s.getAgent(route.Cluster)
+	if agent == nil {
+		slog.Warn("no agent for cluster", "cluster", route.Cluster, "domain", route.Domain)
+		conn.Close()
+		return
 	}
 
-	stream := s.streams.Create(proxyConn, route.Service, route.Cluster)
-	slog.Info("stream opened", "id", stream.ID, "sni", info.SNI, "target", route.Service, "cluster", route.Cluster)
+	stream := s.streams.Create(conn, route.Service, route.Cluster)
+	slog.Info("stream opened", "id", stream.ID, "domain", route.Domain, "target", route.Service, "cluster", route.Cluster)
 
 	frame := proto.EncodeFrame(&proto.Frame{
 		Type:     proto.MsgOpenStream,
@@ -236,11 +200,10 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	// wait for agent to connect to target before proxying
 	go func() {
 		select {
 		case <-stream.Ready:
-			slog.Info("stream ready, proxying", "id", stream.ID, "sni", info.SNI, "target", route.Service)
+			slog.Info("stream ready, proxying", "id", stream.ID, "domain", route.Domain, "target", route.Service)
 			s.proxyClientToAgent(stream, agent)
 		case <-ctx.Done():
 			slog.Debug("stream cancelled before ready", "id", stream.ID)
