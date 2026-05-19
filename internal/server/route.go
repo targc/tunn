@@ -8,9 +8,9 @@ import (
 )
 
 type Route struct {
-	Domain  string         `yaml:"domain"  gorm:"column:domain;primaryKey"`
-	Service string         `yaml:"service" gorm:"column:service"`
-	Cluster string         `yaml:"cluster" gorm:"column:cluster"`
+	Domain  string         `yaml:"domain"  gorm:"column:domain;type:varchar(200);primaryKey"`
+	Service string         `yaml:"service" gorm:"column:service;type:varchar(200);not null"`
+	Cluster string         `yaml:"cluster" gorm:"column:cluster;type:varchar(100);not null"`
 	ALPN    pq.StringArray `yaml:"alpn,omitempty" gorm:"column:alpn;type:text[]"`
 }
 

@@ -32,6 +32,13 @@ func NewRouteManagerPostgres(databaseURL string) (*RouteManagerPostgres, error) 
 		return nil, err
 	}
 
+	if !db.Migrator().HasTable(&Route{}) {
+		if err := db.Migrator().CreateTable(&Route{}); err != nil {
+			return nil, fmt.Errorf("failed to create routes table: %w", err)
+		}
+		slog.Info("created routes table")
+	}
+
 	slog.Info("using postgres route manager")
 
 	return &RouteManagerPostgres{db: db}, nil
