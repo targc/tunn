@@ -1,51 +1,32 @@
 package server
 
 import (
+	"context"
 	"fmt"
-	"sync"
+
+	"gorm.io/gorm"
 )
 
-type RouteTable struct {
-	routes map[string]*Route
-	mu     sync.RWMutex
+func lookupRoute(ctx context.Context, db *gorm.DB, domain string) (*Route, error) {
+	var route Route
+	err := db.
+		WithContext(ctx).
+		Where("domain = ?", domain).
+		First(&route).
+		Error
+
+	if err != nil {
+		return nil, fmt.Errorf("no route for domain %q: %w", domain, err)
+	}
+	return &route, nil
 }
 
-func NewRouteTable(routes []Route) *RouteTable {
-	rt := &RouteTable{
-		routes: make(map[string]*Route, len(routes)),
-	}
-	for i := range routes {
-		rt.routes[routes[i].Domain] = &routes[i]
-	}
-	return rt
-}
-
-func (rt *RouteTable) Lookup(domain string) (*Route, error) {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-
-	entry, ok := rt.routes[domain]
-	if !ok {
-		return nil, fmt.Errorf("no route for domain %q", domain)
-	}
-	return entry, nil
-}
-
-func (rt *RouteTable) Reload(routes []Route) {
-	rt.mu.Lock()
-	defer rt.mu.Unlock()
-	rt.routes = make(map[string]*Route, len(routes))
-	for i := range routes {
-		rt.routes[routes[i].Domain] = &routes[i]
-	}
-}
-
-func (rt *RouteTable) ValidateALPN(entry *Route, clientALPN []string) error {
-	if len(entry.ALPN) == 0 {
-		return nil // no ALPN restriction
+func validateALPN(route *Route, clientALPN []string) error {
+	if len(route.ALPN) == 0 {
+		return nil
 	}
 
-	for _, allowed := range entry.ALPN {
+	for _, allowed := range route.ALPN {
 		for _, offered := range clientALPN {
 			if allowed == offered {
 				return nil
@@ -53,5 +34,5 @@ func (rt *RouteTable) ValidateALPN(entry *Route, clientALPN []string) error {
 		}
 	}
 
-	return fmt.Errorf("ALPN mismatch for %q: route allows %v, client offered %v", entry.Domain, entry.ALPN, clientALPN)
+	return fmt.Errorf("ALPN mismatch for %q: route allows %v, client offered %v", route.Domain, route.ALPN, clientALPN)
 }

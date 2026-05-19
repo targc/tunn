@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/targc/tunn/internal/proto"
+	"gorm.io/gorm"
 )
 
 type agentConn struct {
@@ -20,17 +21,17 @@ type agentConn struct {
 
 type TunnelServer struct {
 	config  *Config
-	routes  *RouteTable
+	db      *gorm.DB
 	streams *StreamManager
 
-	agents map[string]*agentConn // clusterID → agent
+	agents map[string]*agentConn
 	mu     sync.RWMutex
 }
 
-func New(cfg *Config) *TunnelServer {
+func New(cfg *Config, db *gorm.DB) *TunnelServer {
 	return &TunnelServer{
 		config:  cfg,
-		routes:  NewRouteTable(cfg.Routes),
+		db:      db,
 		streams: NewStreamManager(),
 		agents:  make(map[string]*agentConn),
 	}
@@ -76,33 +77,33 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	entry, err := s.routes.Lookup(info.SNI)
+	route, err := lookupRoute(ctx, s.db, info.SNI)
 	if err != nil {
 		slog.Warn("no route", "sni", info.SNI, "remote", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
 
-	if err := s.routes.ValidateALPN(entry, info.ALPN); err != nil {
+	if err := validateALPN(route, info.ALPN); err != nil {
 		slog.Warn("alpn rejected", "err", err, "remote", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
 
-	agent := s.getAgent(entry.Cluster)
+	agent := s.getAgent(route.Cluster)
 	if agent == nil {
-		slog.Warn("no agent for cluster", "cluster", entry.Cluster, "sni", info.SNI)
+		slog.Warn("no agent for cluster", "cluster", route.Cluster, "sni", info.SNI)
 		conn.Close()
 		return
 	}
 
-	stream := s.streams.Create(replayConn, entry.Service, entry.Cluster)
-	slog.Info("stream opened", "id", stream.ID, "sni", info.SNI, "target", entry.Service, "cluster", entry.Cluster)
+	stream := s.streams.Create(replayConn, route.Service, route.Cluster)
+	slog.Info("stream opened", "id", stream.ID, "sni", info.SNI, "target", route.Service, "cluster", route.Cluster)
 
 	frame := proto.EncodeFrame(&proto.Frame{
 		Type:     proto.MsgOpenStream,
 		StreamID: stream.ID,
-		Payload:  []byte(entry.Service),
+		Payload:  []byte(route.Service),
 	})
 
 	select {

@@ -16,15 +16,19 @@ func NewApp(ctx context.Context) (*App, error) {
 		return nil, err
 	}
 
+	db, err := connectDB(cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+
 	slog.Info("tunnel server configured",
 		"tcp", cfg.Listen,
 		"ws", cfg.WSListen,
-		"routes", len(cfg.Routes),
 	)
 
 	return &App{
 		Config: cfg,
-		Server: New(cfg),
+		Server: New(cfg, db),
 	}, nil
 }
 
