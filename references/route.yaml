@@ -1,0 +1,31 @@
+---
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: postgres-tls
+  namespace: default
+spec:
+  alpnProtocols:
+    - postgresql
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: example-pg-1
+  namespace: default
+spec:
+  entryPoints:
+    - tcp
+  routes:
+    - match: HostSNI(`test-pg-1.tcplb.nortezh.com`)
+      services:
+        - name: example-pg-1
+          port: 5432
+  tls:
+    secretName: tls-cert
+    options:
+      name: postgres-tls
+      namespace: default
+
+---
