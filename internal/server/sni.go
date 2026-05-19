@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 )
 
@@ -29,9 +30,10 @@ func PeekClientHello(conn net.Conn) (*ClientHelloInfo, net.Conn, error) {
 	}
 	data := buf[:n]
 
-	// Handle PostgreSQL SSLRequest: client sends 8 bytes [0x00000008 0x04d2162f]
-	// We respond with 'S' then read the actual TLS ClientHello
+	// Handle STARTTLS-style negotiation before the actual TLS ClientHello.
+	// PostgreSQL: client sends SSLRequest (8 bytes), server responds 'S', then TLS begins.
 	if isPostgresSSLRequest(data[:n]) {
+		slog.Debug("postgres SSLRequest detected, responding S", "remote", conn.RemoteAddr())
 		if _, err := conn.Write([]byte("S")); err != nil {
 			return nil, nil, fmt.Errorf("failed to send SSLRequest response: %w", err)
 		}
