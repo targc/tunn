@@ -29,6 +29,19 @@ func PeekClientHello(conn net.Conn) (*ClientHelloInfo, net.Conn, error) {
 	}
 	data := buf[:n]
 
+	// Handle PostgreSQL SSLRequest: client sends 8 bytes [0x00000008 0x04d2162f]
+	// We respond with 'S' then read the actual TLS ClientHello
+	if isPostgresSSLRequest(data[:n]) {
+		if _, err := conn.Write([]byte("S")); err != nil {
+			return nil, nil, fmt.Errorf("failed to send SSLRequest response: %w", err)
+		}
+		n, err = conn.Read(buf)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to read TLS hello after SSLRequest: %w", err)
+		}
+		data = buf[:n]
+	}
+
 	info, err := parseClientHello(data)
 	if err != nil {
 		return nil, nil, err
@@ -40,6 +53,17 @@ func PeekClientHello(conn net.Conn) (*ClientHelloInfo, net.Conn, error) {
 	}
 
 	return info, replay, nil
+}
+
+// isPostgresSSLRequest checks for PostgreSQL SSLRequest message.
+// Format: 4-byte length (8) + 4-byte code (80877103 = 0x04d2162f)
+func isPostgresSSLRequest(data []byte) bool {
+	if len(data) < 8 {
+		return false
+	}
+	length := int(data[0])<<24 | int(data[1])<<16 | int(data[2])<<8 | int(data[3])
+	code := int(data[4])<<24 | int(data[5])<<16 | int(data[6])<<8 | int(data[7])
+	return length == 8 && code == 80877103
 }
 
 func parseClientHello(data []byte) (*ClientHelloInfo, error) {
