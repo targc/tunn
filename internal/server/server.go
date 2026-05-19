@@ -11,7 +11,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/targc/tunn/internal/proto"
-	"gorm.io/gorm"
 )
 
 type agentConn struct {
@@ -21,17 +20,17 @@ type agentConn struct {
 
 type TunnelServer struct {
 	config  *Config
-	db      *gorm.DB
+	routes  IRouteManager
 	streams *StreamManager
 
 	agents map[string]*agentConn
 	mu     sync.RWMutex
 }
 
-func New(cfg *Config, db *gorm.DB) *TunnelServer {
+func New(cfg *Config, routes IRouteManager) *TunnelServer {
 	return &TunnelServer{
 		config:  cfg,
-		db:      db,
+		routes:  routes,
 		streams: NewStreamManager(),
 		agents:  make(map[string]*agentConn),
 	}
@@ -77,7 +76,7 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	route, err := lookupRoute(ctx, s.db, info.SNI)
+	route, err := s.routes.LookupRoute(ctx, info.SNI)
 	if err != nil {
 		slog.Warn("no route", "sni", info.SNI, "remote", conn.RemoteAddr())
 		conn.Close()

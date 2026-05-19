@@ -16,7 +16,7 @@ func NewApp(ctx context.Context) (*App, error) {
 		return nil, err
 	}
 
-	db, err := connectDB(cfg.DatabaseURL)
+	routeMgr, err := buildRouteManager(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -28,7 +28,7 @@ func NewApp(ctx context.Context) (*App, error) {
 
 	return &App{
 		Config: cfg,
-		Server: New(cfg, db),
+		Server: New(cfg, routeMgr),
 	}, nil
 }
 
