@@ -63,6 +63,7 @@ func (a *TunnelAgent) Run(ctx context.Context) error {
 func (a *TunnelAgent) connect(ctx context.Context) error {
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+a.config.AgentToken)
+	header.Set("X-Cluster-ID", a.config.ClusterID)
 
 	ws, _, err := websocket.DefaultDialer.DialContext(ctx, a.config.ServerURL, header)
 	if err != nil {
@@ -70,7 +71,7 @@ func (a *TunnelAgent) connect(ctx context.Context) error {
 	}
 	defer ws.Close()
 
-	slog.Info("connected to server", "url", a.config.ServerURL)
+	slog.Info("connected to server", "url", a.config.ServerURL, "cluster", a.config.ClusterID)
 
 	// reset backoff on successful connect
 	done := make(chan struct{})

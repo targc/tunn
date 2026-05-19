@@ -11,6 +11,7 @@ type Stream struct {
 	ID      uint32
 	Conn    net.Conn
 	Target  string
+	Cluster string
 	Created time.Time
 	closed  atomic.Bool
 }
@@ -39,12 +40,13 @@ func NewStreamManager() *StreamManager {
 	return sm
 }
 
-func (sm *StreamManager) Create(conn net.Conn, target string) *Stream {
+func (sm *StreamManager) Create(conn net.Conn, target, cluster string) *Stream {
 	id := sm.nextID.Add(1) - 1
 	s := &Stream{
 		ID:      id,
 		Conn:    conn,
 		Target:  target,
+		Cluster: cluster,
 		Created: time.Now(),
 	}
 
@@ -77,5 +79,16 @@ func (sm *StreamManager) CloseAll() {
 	for id, s := range sm.streams {
 		s.Close()
 		delete(sm.streams, id)
+	}
+}
+
+func (sm *StreamManager) CloseByCluster(cluster string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	for id, s := range sm.streams {
+		if s.Cluster == cluster {
+			s.Close()
+			delete(sm.streams, id)
+		}
 	}
 }

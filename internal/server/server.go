@@ -13,14 +13,18 @@ import (
 	"github.com/targc/tunn/internal/proto"
 )
 
+type agentConn struct {
+	ws      *websocket.Conn
+	writeCh chan []byte
+}
+
 type TunnelServer struct {
 	config  *Config
 	routes  *RouteTable
 	streams *StreamManager
 
-	agentConn *websocket.Conn
-	writeCh   chan []byte
-	mu        sync.RWMutex
+	agents map[string]*agentConn // clusterID → agent
+	mu     sync.RWMutex
 }
 
 func New(cfg *Config) *TunnelServer {
@@ -28,7 +32,7 @@ func New(cfg *Config) *TunnelServer {
 		config:  cfg,
 		routes:  NewRouteTable(cfg.Routes),
 		streams: NewStreamManager(),
-		writeCh: make(chan []byte, 256),
+		agents:  make(map[string]*agentConn),
 	}
 }
 
@@ -85,18 +89,15 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	s.mu.RLock()
-	agent := s.agentConn
-	s.mu.RUnlock()
-
+	agent := s.getAgent(entry.Cluster)
 	if agent == nil {
-		slog.Warn("no agent connected", "sni", info.SNI)
+		slog.Warn("no agent for cluster", "cluster", entry.Cluster, "sni", info.SNI)
 		conn.Close()
 		return
 	}
 
-	stream := s.streams.Create(replayConn, entry.Service)
-	slog.Info("stream opened", "id", stream.ID, "sni", info.SNI, "target", entry.Service)
+	stream := s.streams.Create(replayConn, entry.Service, entry.Cluster)
+	slog.Info("stream opened", "id", stream.ID, "sni", info.SNI, "target", entry.Service, "cluster", entry.Cluster)
 
 	frame := proto.EncodeFrame(&proto.Frame{
 		Type:     proto.MsgOpenStream,
@@ -105,18 +106,23 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 	})
 
 	select {
-	case s.writeCh <- frame:
+	case agent.writeCh <- frame:
 	default:
 		slog.Error("write channel full, dropping stream", "id", stream.ID)
 		s.streams.Remove(stream.ID)
 		return
 	}
 
-	// read from TCP client, send Data frames to agent
-	go s.proxyClientToAgent(stream)
+	go s.proxyClientToAgent(stream, agent)
 }
 
-func (s *TunnelServer) proxyClientToAgent(stream *Stream) {
+func (s *TunnelServer) getAgent(clusterID string) *agentConn {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.agents[clusterID]
+}
+
+func (s *TunnelServer) proxyClientToAgent(stream *Stream, agent *agentConn) {
 	defer s.streams.Remove(stream.ID)
 
 	buf := make([]byte, 32*1024)
@@ -129,7 +135,7 @@ func (s *TunnelServer) proxyClientToAgent(stream *Stream) {
 				Payload:  buf[:n],
 			})
 			select {
-			case s.writeCh <- frame:
+			case agent.writeCh <- frame:
 			default:
 				slog.Error("write channel full", "stream", stream.ID)
 				return
@@ -144,7 +150,7 @@ func (s *TunnelServer) proxyClientToAgent(stream *Stream) {
 				StreamID: stream.ID,
 			})
 			select {
-			case s.writeCh <- closeFrame:
+			case agent.writeCh <- closeFrame:
 			default:
 			}
 			return
@@ -181,42 +187,52 @@ func (s *TunnelServer) handleAgentWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	clusterID := r.Header.Get("X-Cluster-ID")
+	if clusterID == "" {
+		http.Error(w, "missing X-Cluster-ID header", http.StatusBadRequest)
+		return
+	}
+
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("ws upgrade failed", "err", err)
 		return
 	}
 
-	slog.Info("agent connected", "remote", r.RemoteAddr)
+	slog.Info("agent connected", "cluster", clusterID, "remote", r.RemoteAddr)
+
+	agent := &agentConn{
+		ws:      ws,
+		writeCh: make(chan []byte, 256),
+	}
 
 	s.mu.Lock()
-	if s.agentConn != nil {
-		s.agentConn.Close()
+	if old, ok := s.agents[clusterID]; ok {
+		old.ws.Close()
 	}
-	s.agentConn = ws
+	s.agents[clusterID] = agent
 	s.mu.Unlock()
 
-	// start write pump
-	go s.wsWritePump(ws)
+	go s.wsWritePump(agent)
 
-	// read from agent
 	s.wsReadPump(ws)
 
 	s.mu.Lock()
-	if s.agentConn == ws {
-		s.agentConn = nil
+	if s.agents[clusterID] == agent {
+		delete(s.agents, clusterID)
 	}
 	s.mu.Unlock()
 
-	s.streams.CloseAll()
-	slog.Info("agent disconnected")
+	close(agent.writeCh)
+	s.streams.CloseByCluster(clusterID)
+	slog.Info("agent disconnected", "cluster", clusterID)
 }
 
-func (s *TunnelServer) wsWritePump(ws *websocket.Conn) {
-	for data := range s.writeCh {
-		if err := ws.WriteMessage(websocket.BinaryMessage, data); err != nil {
+func (s *TunnelServer) wsWritePump(agent *agentConn) {
+	for data := range agent.writeCh {
+		if err := agent.ws.WriteMessage(websocket.BinaryMessage, data); err != nil {
 			slog.Error("ws write error", "err", err)
-			ws.Close()
+			agent.ws.Close()
 			return
 		}
 	}

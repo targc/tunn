@@ -1,10 +1,18 @@
 routes:
+  # cluster-a
   - domain: "test-pg-1.tcplb.nortezh.com"
     service: "example-pg-1.default.svc.cluster.local:5432"
+    cluster: "cluster-a"
     alpn:
       - postgresql
 
   - domain: "test-pg-2.tcplb.nortezh.com"
     service: "example-pg-2.default.svc.cluster.local:5432"
+    cluster: "cluster-a"
     alpn:
       - postgresql
+
+  # cluster-b
+  - domain: "redis-1.tcplb.nortezh.com"
+    service: "redis-master.default.svc.cluster.local:6379"
+    cluster: "cluster-b"

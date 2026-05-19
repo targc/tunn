@@ -23,6 +23,7 @@ type Config struct {
 type Route struct {
 	Domain  string   `yaml:"domain"`
 	Service string   `yaml:"service"`
+	Cluster string   `yaml:"cluster"`
 	ALPN    []string `yaml:"alpn,omitempty"`
 }
 
