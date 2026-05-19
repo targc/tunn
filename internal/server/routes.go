@@ -31,6 +31,15 @@ func (rt *RouteTable) Lookup(domain string) (*Route, error) {
 	return entry, nil
 }
 
+func (rt *RouteTable) Reload(routes []Route) {
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	rt.routes = make(map[string]*Route, len(routes))
+	for i := range routes {
+		rt.routes[routes[i].Domain] = &routes[i]
+	}
+}
+
 func (rt *RouteTable) ValidateALPN(entry *Route, clientALPN []string) error {
 	if len(entry.ALPN) == 0 {
 		return nil // no ALPN restriction
