@@ -1,0 +1,16 @@
+services:
+  server:
+    image: ghcr.io/targc/tunn-server:dd18f8fe3e439294cb1c61d75f4dcad1f81c53cd
+    ports:
+      - "6060:6060"
+      - "6061:6061"
+    environment:
+      - TUNN_AGENT_TOKEN=${TUNN_AGENT_TOKEN}
+      - TUNN_DATABASE_URL=postgres://tunn:tunn@db:5432/tunn?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
