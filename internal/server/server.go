@@ -113,7 +113,15 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	go s.proxyClientToAgent(stream, agent)
+	// wait for agent to connect to target before proxying
+	go func() {
+		select {
+		case <-stream.Ready:
+			s.proxyClientToAgent(stream, agent)
+		case <-ctx.Done():
+			s.streams.Remove(stream.ID)
+		}
+	}()
 }
 
 func (s *TunnelServer) getAgent(clusterID string) *agentConn {
@@ -255,6 +263,14 @@ func (s *TunnelServer) wsReadPump(ws *websocket.Conn) {
 		switch frame.Type {
 		case proto.MsgStreamReady:
 			slog.Debug("stream ready", "id", frame.StreamID)
+			if stream, ok := s.streams.Get(frame.StreamID); ok {
+				select {
+				case <-stream.Ready:
+					// already closed
+				default:
+					close(stream.Ready)
+				}
+			}
 
 		case proto.MsgData:
 			stream, ok := s.streams.Get(frame.StreamID)

@@ -13,6 +13,7 @@ type Stream struct {
 	Target  string
 	Cluster string
 	Created time.Time
+	Ready   chan struct{}
 	closed  atomic.Bool
 }
 
@@ -48,6 +49,7 @@ func (sm *StreamManager) Create(conn net.Conn, target, cluster string) *Stream {
 		Target:  target,
 		Cluster: cluster,
 		Created: time.Now(),
+		Ready:   make(chan struct{}),
 	}
 
 	sm.mu.Lock()
