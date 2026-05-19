@@ -69,12 +69,16 @@ func (s *TunnelServer) startTCPListener(ctx context.Context) error {
 }
 
 func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
+	slog.Debug("new tcp connection", "remote", conn.RemoteAddr())
+
 	info, replayConn, err := PeekClientHello(conn)
 	if err != nil {
-		slog.Debug("sni peek failed", "err", err, "remote", conn.RemoteAddr())
+		slog.Warn("sni peek failed", "err", err, "remote", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
+
+	slog.Debug("tls client hello", "sni", info.SNI, "alpn", info.ALPN, "remote", conn.RemoteAddr())
 
 	route, err := s.routes.LookupRoute(ctx, info.SNI)
 	if err != nil {
@@ -84,7 +88,7 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 	}
 
 	if err := validateALPN(route, info.ALPN); err != nil {
-		slog.Warn("alpn rejected", "err", err, "remote", conn.RemoteAddr())
+		slog.Warn("alpn rejected", "err", err, "sni", info.SNI, "remote", conn.RemoteAddr())
 		conn.Close()
 		return
 	}
@@ -117,8 +121,10 @@ func (s *TunnelServer) handleConn(ctx context.Context, conn net.Conn) {
 	go func() {
 		select {
 		case <-stream.Ready:
+			slog.Info("stream ready, proxying", "id", stream.ID, "sni", info.SNI, "target", route.Service)
 			s.proxyClientToAgent(stream, agent)
 		case <-ctx.Done():
+			slog.Debug("stream cancelled before ready", "id", stream.ID)
 			s.streams.Remove(stream.ID)
 		}
 	}()

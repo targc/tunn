@@ -136,6 +136,7 @@ func (a *TunnelAgent) connect(ctx context.Context) error {
 }
 
 func (a *TunnelAgent) handleOpenStream(streamID uint32, target string) {
+	slog.Debug("dialing target", "stream", streamID, "target", target)
 	conn, err := net.DialTimeout("tcp", target, 5*time.Second)
 	if err != nil {
 		slog.Error("failed to dial target", "stream", streamID, "target", target, "err", err)
@@ -212,6 +213,7 @@ func (a *TunnelAgent) removeStream(id uint32) {
 	if conn, ok := a.streams[id]; ok {
 		conn.Close()
 		delete(a.streams, id)
+		slog.Debug("stream removed", "id", id)
 	}
 	a.mu.Unlock()
 }
